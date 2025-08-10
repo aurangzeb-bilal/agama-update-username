@@ -1149,7 +1149,7 @@
 						{
 							"variable": "authCheck.valid",
 							"operator": "is",
-							"dataValue": "false",
+							"dataValue": "true",
 							"combinator": "none"
 						}
 					],
@@ -1166,7 +1166,7 @@
 				"width": 110,
 				"height": 60
 			},
-			"selected": true,
+			"selected": false,
 			"dragging": false
 		},
 		{
@@ -1206,7 +1206,7 @@
 				"width": 170,
 				"height": 124
 			},
-			"selected": false,
+			"selected": true,
 			"dragging": false
 		},
 		{
@@ -1886,8 +1886,8 @@
 		}
 	],
 	"viewport": {
-		"x": 0,
-		"y": 0,
-		"zoom": 1
+		"x": 92.15827779085782,
+		"y": 8.495943474992828,
+		"zoom": 0.9740042685432408
 	}
 }
