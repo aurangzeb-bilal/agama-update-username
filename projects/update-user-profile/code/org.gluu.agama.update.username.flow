@@ -2,12 +2,20 @@ Flow org.gluu.agama.update.username
      Basepath ""
      Timeout 50000 seconds
      Inputs access_token
+     
 // "Access Token call start"
 Log "@info Access Token call start"
+Log "@info access_token value: %" access_token
+Log "@info access_token is null: %" (access_token == null)
+
 authCheck = Call org.gluu.agama.update.JansUsernameUpdate#validateBearerToken access_token
+
+Log "@info authCheck.valid: %" authCheck.valid
+
 When authCheck.valid is false
      authErrorResponse = { success:false, error: authCheck.error }
      Finish authErrorResponse
+     
 //  Create  variable for UI feedback
 uiFeedback = {}
 uiFeedback.errorMessage = ""
