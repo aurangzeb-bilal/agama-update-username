@@ -11,7 +11,6 @@ import io.jans.agama.engine.script.LogUtils;
 import io.jans.as.common.service.common.ConfigurationService;
 import java.security.SecureRandom;
 import java.util.*;
-import java.util.regex.Pattern;
 import org.gluu.agama.smtp.SendEmailTemplate;
 import org.gluu.agama.smtp.jans.model.ContextData;
 import io.jans.model.SmtpConfiguration;
@@ -138,17 +137,24 @@ public class JansUsernameUpdate extends UsernameUpdate {
     }
     
     public boolean passwordPolicyMatch(String userPassword) {
-        // Fixed regex with proper escaping
-        String regex = "^(?=.*[!@#$\\^&*])[A-Za-z0-9!@#$\\^&*]{6,}$";
-        Pattern pattern = Pattern.compile(regex);
-        return pattern.matcher(userPassword).matches();
+        // Simple password validation - at least 6 characters
+        if (userPassword == null || userPassword.length() < 6) {
+            return false;
+        }
+        return true;
     }
 
     public boolean usernamePolicyMatch(String userName) {
-        // Simple regex for alphabets only
-        String regex = "^[A-Za-z]+$";
-        Pattern pattern = Pattern.compile(regex);
-        return pattern.matcher(userName).matches();
+        // Simple username validation - only letters
+        if (userName == null || userName.isEmpty()) {
+            return false;
+        }
+        for (char c : userName.toCharArray()) {
+            if (!Character.isLetter(c)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public Map<String, String> getUserEntityByMail(String email) {
