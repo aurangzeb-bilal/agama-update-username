@@ -1,7 +1,6 @@
 package org.gluu.agama.update;
 
 import io.jans.as.common.model.common.User;
-import io.jans.as.common.service.common.EncryptionService;
 import io.jans.as.common.service.common.UserService;
 import io.jans.orm.exception.operation.EntryNotFoundException;
 import io.jans.service.cdi.util.CdiUtil;
@@ -9,12 +8,9 @@ import io.jans.util.StringHelper;
 
 import org.gluu.agama.user.UsernameUpdate;
 import io.jans.agama.engine.script.LogUtils;
-import java.io.IOException;
 import io.jans.as.common.service.common.ConfigurationService;
 import java.security.SecureRandom;
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.regex.Pattern;
 import org.gluu.agama.smtp.SendEmailTemplate;
 import org.gluu.agama.smtp.jans.model.ContextData;
@@ -22,12 +18,6 @@ import io.jans.model.SmtpConfiguration;
 import io.jans.service.MailService;
 import io.jans.as.model.common.IntrospectionResponse;
 import io.jans.as.server.service.IntrospectionService;
-import io.jans.agama.engine.service.ActionService;
-import jakarta.servlet.http.HttpServletRequest;
-import io.jans.as.model.jwt.Jwt;
-import io.jans.as.model.jwt.JwtClaims;
-import io.jans.as.model.jwt.JwtHeader;
-import io.jans.agama.engine.service.WebContext;
 
 public class JansUsernameUpdate extends UsernameUpdate {
 
@@ -38,9 +28,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
     private static final String LAST_NAME = "sn";
     private static final String PASSWORD = "userPassword";
     private static final String INUM_ATTR = "inum";
-    private static final String EXT_ATTR = "jansExtUid";
-    private static final String USER_STATUS = "jansStatus";
-    private static final String EXT_UID_PREFIX = "github:";
     private static final String LANG = "lang";
     private static final SecureRandom RAND = new SecureRandom();
 
@@ -52,70 +39,112 @@ public class JansUsernameUpdate extends UsernameUpdate {
     public static synchronized JansUsernameUpdate getInstance() {
         if (INSTANCE == null)
             INSTANCE = new JansUsernameUpdate();
-
         return INSTANCE;
     }
 
     public static Map<String, Object> validateBearerToken(String access_token) {
-    Map<String, Object> result = new HashMap<>();
-
-    try {
-        // ✅ Handle null or empty token
-        if (access_token == null || access_token.trim().isEmpty()) {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            LogUtils.log("validateBearerToken called");
+            LogUtils.log("Received token parameter: " + (access_token != null ? "not null" : "null"));
+            
+            if (access_token != null) {
+                LogUtils.log("Token length: " + access_token.length());
+                if (access_token.length() > 0) {
+                    LogUtils.log("Token starts with: " + access_token.substring(0, Math.min(30, access_token.length())) + "...");
+                }
+            }
+            
+            // Check if token is missing or empty
+            if (access_token == null || access_token.trim().isEmpty()) {
+                LogUtils.log("ERROR: Access token is null or empty");
+                result.put("valid", false);
+                result.put("error", "Access token is missing. Please provide it in the request body.");
+                return result;
+            }
+            
+            String token = access_token.trim();
+            LogUtils.log("Attempting to introspect token...");
+            
+            // Get IntrospectionService
+            IntrospectionService introspectionService = CdiUtil.bean(IntrospectionService.class);
+            
+            if (introspectionService == null) {
+                LogUtils.log("ERROR: Could not get IntrospectionService bean");
+                result.put("valid", false);
+                result.put("error", "IntrospectionService not available");
+                return result;
+            }
+            
+            LogUtils.log("Got IntrospectionService, calling introspect...");
+            IntrospectionResponse introspectionResponse = introspectionService.introspect(token);
+            
+            if (introspectionResponse == null) {
+                LogUtils.log("ERROR: Introspection returned null response");
+                result.put("valid", false);
+                result.put("error", "Token validation failed - no introspection response");
+                return result;
+            }
+            
+            boolean isActive = introspectionResponse.isActive();
+            LogUtils.log("Token active status: " + isActive);
+            
+            if (!isActive) {
+                LogUtils.log("ERROR: Token is inactive/expired");
+                result.put("valid", false);
+                result.put("error", "Token is invalid or expired");
+                return result;
+            }
+            
+            // Check scopes
+            String scopes = introspectionResponse.getScope();
+            LogUtils.log("Token scopes: " + scopes);
+            
+            boolean hasRequiredScope = scopes != null && (
+                scopes.contains("profile") ||
+                scopes.contains("user_update") ||
+                scopes.contains("openid")
+            );
+            
+            if (!hasRequiredScope) {
+                LogUtils.log("ERROR: Missing required scope. Token has: " + scopes);
+                result.put("valid", false);
+                result.put("error", "Token does not have required scope (profile, user_update, or openid)");
+                return result;
+            }
+            
+            String clientId = introspectionResponse.getClientId();
+            String username = introspectionResponse.getUsername();
+            
+            LogUtils.log("SUCCESS: Token is valid for client: " + clientId);
+            if (username != null) {
+                LogUtils.log("Token username: " + username);
+            }
+            
+            result.put("valid", true);
+            result.put("clientId", clientId);
+            result.put("username", username);
+            result.put("scopes", scopes);
+            
+        } catch (Exception e) {
+            LogUtils.log("ERROR: Exception during token validation: " + e.getMessage());
+            e.printStackTrace();
             result.put("valid", false);
-            result.put("error", "Access token is missing or empty");
-            return result;
+            result.put("error", "Token validation failed: " + e.getMessage());
         }
-
-        // ✅ Build Bearer header
-        String authHeader = "Bearer " + access_token.trim();
-
-        // 🔹 Introspect the token
-        IntrospectionService introspectionService = CdiUtil.bean(IntrospectionService.class);
-        IntrospectionResponse introspectionResponse = introspectionService.introspect(access_token);
-
-        if (introspectionResponse == null || !introspectionResponse.isActive()) {
-            result.put("valid", false);
-            result.put("error", "Token is invalid or expired");
-            return result;
-        }
-
-        String scopes = introspectionResponse.getScope();
-        boolean hasRequiredScope = scopes != null && (
-            scopes.contains("profile") ||
-            scopes.contains("user_update") ||
-            scopes.contains("openid")
-        );
-
-        if (!hasRequiredScope) {
-            result.put("valid", false);
-            result.put("error", "Token does not have required scope");
-            return result;
-        }
-
-        result.put("valid", true);
-        result.put("clientId", introspectionResponse.getClientId());
-        result.put("username", introspectionResponse.getUsername());
-        result.put("scopes", scopes);
-
-    } catch (Exception e) {
-        result.put("valid", false);
-        result.put("error", "Token validation error: " + e.getMessage());
+        
+        return result;
     }
-
-    return result;
-}
     
-
     public boolean passwordPolicyMatch(String userPassword) {
-        String regex = '''^(?=.*[!@#$^&*])[A-Za-z0-9!@#$^&*]{6,}$'''
+        String regex = "^(?=.*[!@#$^&*])[A-Za-z0-9!@#$^&*]{6,}$";
         Pattern pattern = Pattern.compile(regex);
         return pattern.matcher(userPassword).matches();
     }
 
     public boolean usernamePolicyMatch(String userName) {
-        // Regex: Only alphabets (uppercase and lowercase), minimum 1 character
-        String regex = '''^[A-Za-z]+$''';
+        String regex = "^[A-Za-z]+$";
         Pattern pattern = Pattern.compile(regex);
         return pattern.matcher(userName).matches();
     }
@@ -137,13 +166,11 @@ public class JansUsernameUpdate extends UsernameUpdate {
                 }
             }
 
-            // Creating a truly modifiable map
             Map<String, String> userMap = new HashMap<>();
             userMap.put(UID, uid);
             userMap.put(INUM_ATTR, inum);
             userMap.put("name", name);
             userMap.put("email", email);
-
             return userMap;
         }
 
@@ -159,7 +186,7 @@ public class JansUsernameUpdate extends UsernameUpdate {
             String email = getSingleValuedAttr(user, MAIL);
             String inum = getSingleValuedAttr(user, INUM_ATTR);
             String name = getSingleValuedAttr(user, GIVEN_NAME);
-            String uid = getSingleValuedAttr(user, UID); // Define uid properly
+            String uid = getSingleValuedAttr(user, UID);
             String displayName = getSingleValuedAttr(user, DISPLAY_NAME);
             String givenName = getSingleValuedAttr(user, GIVEN_NAME);
             String sn = getSingleValuedAttr(user, LAST_NAME);
@@ -171,7 +198,7 @@ public class JansUsernameUpdate extends UsernameUpdate {
                     name = email.substring(0, email.indexOf("@"));
                 }
             }
-            // Creating a modifiable HashMap directly
+            
             Map<String, String> userMap = new HashMap<>();
             userMap.put(UID, uid);
             userMap.put(INUM_ATTR, inum);
@@ -180,11 +207,13 @@ public class JansUsernameUpdate extends UsernameUpdate {
             userMap.put(DISPLAY_NAME, displayName);
             userMap.put(LAST_NAME, sn);
             userMap.put(LANG, lang);
-
+            userMap.put("empty", "false");
             return userMap;
         }
 
-        return new HashMap<>();
+        Map<String, String> emptyMap = new HashMap<>();
+        emptyMap.put("empty", "true");
+        return emptyMap;
     }
 
     public String addNewUser(Map<String, String> profile) throws Exception {
@@ -199,7 +228,7 @@ public class JansUsernameUpdate extends UsernameUpdate {
         });
 
         UserService userService = CdiUtil.bean(UserService.class);
-        user = userService.addUser(user, true); // Set user status active
+        user = userService.addUser(user, true);
 
         if (user == null) {
             throw new EntryNotFoundException("Added user not found");
@@ -216,18 +245,15 @@ public class JansUsernameUpdate extends UsernameUpdate {
             throw new EntryNotFoundException("User not found for inum: " + inum);
         }
 
-        // 🔒 Preserve current email and lang
         String currentEmail = getSingleValuedAttr(user, MAIL);
         String currentLanguage = getSingleValuedAttr(user, LANG);
 
-        // ✅ Update UID if provided
         String newUid = profile.get(UID);
         if (StringHelper.isNotEmpty(newUid)) {
             user.setAttribute(UID, newUid);
             user.setUserId(newUid);
         }
 
-        // ✅ Always preserve email and lang
         if (StringHelper.isNotEmpty(currentEmail)) {
             user.setAttribute(MAIL, currentEmail);
         }
@@ -235,7 +261,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
             user.setAttribute(LANG, currentLanguage);
         }
 
-        // ✅ Save the user
         UserService userService = CdiUtil.bean(UserService.class);
         user = userService.updateUser(user);
 
@@ -253,9 +278,8 @@ public class JansUsernameUpdate extends UsernameUpdate {
 
         if (local) {
             String email = getSingleValuedAttr(user, MAIL);
-            // String inum = getSingleValuedAttr(user, INUM_ATTR);
             String name = getSingleValuedAttr(user, GIVEN_NAME);
-            String uid = getSingleValuedAttr(user, UID); // Define uid properly
+            String uid = getSingleValuedAttr(user, UID);
             String displayName = getSingleValuedAttr(user, DISPLAY_NAME);
             String givenName = getSingleValuedAttr(user, GIVEN_NAME);
             String sn = getSingleValuedAttr(user, LAST_NAME);
@@ -268,7 +292,7 @@ public class JansUsernameUpdate extends UsernameUpdate {
                     name = email.substring(0, email.indexOf("@"));
                 }
             }
-            // Creating a modifiable HashMap directly
+            
             Map<String, String> userMap = new HashMap<>();
             userMap.put(UID, uid);
             userMap.put("userId", uid);
@@ -279,7 +303,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
             userMap.put(LAST_NAME, sn);
             userMap.put(PASSWORD, userPassword);
             userMap.put(LANG, lang);
-
             return userMap;
         }
 
@@ -289,13 +312,11 @@ public class JansUsernameUpdate extends UsernameUpdate {
     private String getSingleValuedAttr(User user, String attribute) {
         Object value = null;
         if (attribute.equals(UID)) {
-            // user.getAttribute("uid", true, false) always returns null :(
             value = user.getUserId();
         } else {
             value = user.getAttribute(attribute, true, false);
         }
         return value == null ? null : value.toString();
-
     }
 
     private User getUser(String attributeName, String value) {
@@ -305,7 +326,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
 
     public boolean sendUsernameUpdateEmail(String to, String newUsername, String lang) {
         try {
-            // Fetch SMTP configuration
             ConfigurationService configService = CdiUtil.bean(ConfigurationService.class);
             SmtpConfiguration smtpConfig = configService.getConfiguration().getSmtpConfiguration();
 
@@ -314,53 +334,25 @@ public class JansUsernameUpdate extends UsernameUpdate {
                 return false;
             }
 
-            // Use preferred lang from Agama directly
-            String preferredLang = (lang != null && !lang.isEmpty())
-                    ? lang.toLowerCase()
-                    : "en"; // fallback to English
+            String preferredLang = (lang != null && !lang.isEmpty()) ? lang.toLowerCase() : "en";
 
-            // ✅ Inline translations
             Map<String, Map<String, String>> translations = new HashMap<>();
             translations.put("en", Map.of(
                     "subject", "Your username has been updated successfully",
                     "body", "Your username has been updated to",
                     "footer", "Thanks for keeping your account secure."));
-            translations.put("es", Map.of(
-                    "subject", "Su nombre de usuario se ha actualizado correctamente",
-                    "body", "Su nombre de usuario se ha actualizado a",
-                    "footer", "Gracias por mantener su cuenta segura."));
-            translations.put("fr", Map.of(
-                    "subject", "Votre nom d'utilisateur a été mis à jour avec succès",
-                    "body", "Votre nom d'utilisateur a été mis à jour en",
-                    "footer", "Merci de garder votre compte sécurisé."));
-            translations.put("pt", Map.of(
-                    "subject", "Seu nome de usuário foi atualizado com sucesso",
-                    "body", "Seu nome de usuário foi atualizado para",
-                    "footer", "Obrigado por manter sua conta segura."));
-            translations.put("ar", Map.of(
-                    "subject", "تم تحديث اسم المستخدم الخاص بك بنجاح",
-                    "body", "تم تحديث اسم المستخدم الخاص بك إلى",
-                    "footer", "شكرًا للحفاظ على أمان حسابك."));
-            translations.put("id", Map.of(
-                    "subject", "Nama pengguna Anda berhasil diperbarui",
-                    "body", "Nama pengguna Anda telah diperbarui menjadi",
-                    "footer", "Terima kasih telah menjaga keamanan akun Anda."));
 
-            // ✅ Pick the right lang (fallback to English if missing)
             Map<String, String> bundle = translations.getOrDefault(preferredLang, translations.get("en"));
 
-            // Build context data
             ContextData context = new ContextData();
             context.setDevice("Unknown");
             context.setLocation("Unknown");
             context.setTimeZone("UTC");
 
-            // Prepare localized email content
             String htmlBody = SendEmailTemplate.get(newUsername, context, bundle);
             String subject = bundle.get("subject");
             String textBody = bundle.get("body") + ": " + newUsername;
 
-            // Send signed email
             MailService mailService = CdiUtil.bean(MailService.class);
             boolean sent = mailService.sendMailSigned(
                     smtpConfig.getFromEmailAddress(),
@@ -371,15 +363,14 @@ public class JansUsernameUpdate extends UsernameUpdate {
                     textBody,
                     htmlBody);
 
-            LogUtils.log("Localized username update email sent successfully to %", to);
+            LogUtils.log("Email sent to %", to);
             return sent;
         } catch (Exception e) {
-            LogUtils.log("Failed to send username update email: %", e.getMessage());
+            LogUtils.log("Failed to send email: %", e.getMessage());
             return false;
         }
     }
 
-    // Helper method to fetch SMTP configuration
     private SmtpConfiguration getSmtpConfiguration() {
         ConfigurationService configurationService = CdiUtil.bean(ConfigurationService.class);
         return configurationService.getConfiguration().getSmtpConfiguration();
