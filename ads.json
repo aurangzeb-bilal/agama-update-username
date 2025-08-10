@@ -1,18 +1,1 @@
-{
-    "Gluu": {
-        "projectName": "Gluu",
-        "description": "fsjdnfsd",
-        "type": "community",
-        "author": "aurangzeb-bilal",
-        "version": "0.0.1",
-        "authorWebsite": "https://github.com/aurangzeb-bilal/agama-update-username",
-        "githubUri": "https://github.com/aurangzeb-bilal/agama-update-username",
-        "license": "apache-2.0",
-        "lastUpdated": "1754830055579",
-        "tags": [
-            "openid-connect"
-        ],
-        "noDirectLaunch": [],
-        "configs": {}
-    }
-}
+{}
