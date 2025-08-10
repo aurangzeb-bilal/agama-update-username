@@ -1,7 +1,6 @@
 package org.gluu.agama.update;
 
 import io.jans.as.common.model.common.User;
-import io.jans.as.common.service.common.EncryptionService;
 import io.jans.as.common.service.common.UserService;
 import io.jans.orm.exception.operation.EntryNotFoundException;
 import io.jans.service.cdi.util.CdiUtil;
@@ -9,12 +8,9 @@ import io.jans.util.StringHelper;
 
 import org.gluu.agama.user.UsernameUpdate;
 import io.jans.agama.engine.script.LogUtils;
-import java.io.IOException;
 import io.jans.as.common.service.common.ConfigurationService;
 import java.security.SecureRandom;
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.regex.Pattern;
 import org.gluu.agama.smtp.SendEmailTemplate;
 import org.gluu.agama.smtp.jans.model.ContextData;
@@ -32,9 +28,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
     private static final String LAST_NAME = "sn";
     private static final String PASSWORD = "userPassword";
     private static final String INUM_ATTR = "inum";
-    private static final String EXT_ATTR = "jansExtUid";
-    private static final String USER_STATUS = "jansStatus";
-    private static final String EXT_UID_PREFIX = "github:";
     private static final String LANG = "lang";
     private static final SecureRandom RAND = new SecureRandom();
 
@@ -46,7 +39,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
     public static synchronized JansUsernameUpdate getInstance() {
         if (INSTANCE == null)
             INSTANCE = new JansUsernameUpdate();
-
         return INSTANCE;
     }
 
@@ -55,49 +47,51 @@ public class JansUsernameUpdate extends UsernameUpdate {
         
         try {
             LogUtils.log("validateBearerToken called");
-            LogUtils.log("access_token parameter received: " + (access_token != null ? "not null" : "null"));
+            LogUtils.log("Received token parameter: " + (access_token != null ? "not null" : "null"));
             
             if (access_token != null) {
-                LogUtils.log("access_token length: " + access_token.length());
-                LogUtils.log("access_token first 30 chars: " + access_token.substring(0, Math.min(30, access_token.length())) + "...");
+                LogUtils.log("Token length: " + access_token.length());
+                if (access_token.length() > 0) {
+                    LogUtils.log("Token starts with: " + access_token.substring(0, Math.min(30, access_token.length())) + "...");
+                }
             }
             
             // Check if token is missing or empty
             if (access_token == null || access_token.trim().isEmpty()) {
-                LogUtils.log("ERROR: Access token is missing or empty");
+                LogUtils.log("ERROR: Access token is null or empty");
                 result.put("valid", false);
                 result.put("error", "Access token is missing. Please provide it in the request body.");
                 return result;
             }
             
             String token = access_token.trim();
-            LogUtils.log("Starting token introspection...");
+            LogUtils.log("Attempting to introspect token...");
             
             // Get IntrospectionService
             IntrospectionService introspectionService = CdiUtil.bean(IntrospectionService.class);
             
             if (introspectionService == null) {
-                LogUtils.log("ERROR: IntrospectionService is null");
+                LogUtils.log("ERROR: Could not get IntrospectionService bean");
                 result.put("valid", false);
                 result.put("error", "IntrospectionService not available");
                 return result;
             }
             
-            // Introspect the token
-            LogUtils.log("Calling introspection service...");
+            LogUtils.log("Got IntrospectionService, calling introspect...");
             IntrospectionResponse introspectionResponse = introspectionService.introspect(token);
             
             if (introspectionResponse == null) {
-                LogUtils.log("ERROR: Introspection response is null");
+                LogUtils.log("ERROR: Introspection returned null response");
                 result.put("valid", false);
-                result.put("error", "Token validation failed - introspection returned null");
+                result.put("error", "Token validation failed - no introspection response");
                 return result;
             }
             
-            LogUtils.log("Introspection response received. Active: " + introspectionResponse.isActive());
+            boolean isActive = introspectionResponse.isActive();
+            LogUtils.log("Token active status: " + isActive);
             
-            if (!introspectionResponse.isActive()) {
-                LogUtils.log("ERROR: Token is not active/expired");
+            if (!isActive) {
+                LogUtils.log("ERROR: Token is inactive/expired");
                 result.put("valid", false);
                 result.put("error", "Token is invalid or expired");
                 return result;
@@ -114,19 +108,19 @@ public class JansUsernameUpdate extends UsernameUpdate {
             );
             
             if (!hasRequiredScope) {
-                LogUtils.log("ERROR: Token does not have required scope. Has: " + scopes);
+                LogUtils.log("ERROR: Missing required scope. Token has: " + scopes);
                 result.put("valid", false);
                 result.put("error", "Token does not have required scope (profile, user_update, or openid)");
                 return result;
             }
             
-            // Token is valid
             String clientId = introspectionResponse.getClientId();
             String username = introspectionResponse.getUsername();
             
-            LogUtils.log("Token validation SUCCESSFUL!");
-            LogUtils.log("Client ID: " + clientId);
-            LogUtils.log("Username: " + username);
+            LogUtils.log("SUCCESS: Token is valid for client: " + clientId);
+            if (username != null) {
+                LogUtils.log("Token username: " + username);
+            }
             
             result.put("valid", true);
             result.put("clientId", clientId);
@@ -134,22 +128,24 @@ public class JansUsernameUpdate extends UsernameUpdate {
             result.put("scopes", scopes);
             
         } catch (Exception e) {
-            LogUtils.log("ERROR: Exception in validateBearerToken: " + e.getMessage());
+            LogUtils.log("ERROR: Exception during token validation: " + e.getMessage());
             e.printStackTrace();
             result.put("valid", false);
-            result.put("error", "Token validation error: " + e.getMessage());
+            result.put("error", "Token validation failed: " + e.getMessage());
         }
         
         return result;
     }
     
     public boolean passwordPolicyMatch(String userPassword) {
-        String regex = "^(?=.*[!@#$^&*])[A-Za-z0-9!@#$^&*]{6,}$";
+        // Fixed regex with proper escaping
+        String regex = "^(?=.*[!@#$\\^&*])[A-Za-z0-9!@#$\\^&*]{6,}$";
         Pattern pattern = Pattern.compile(regex);
         return pattern.matcher(userPassword).matches();
     }
 
     public boolean usernamePolicyMatch(String userName) {
+        // Simple regex for alphabets only
         String regex = "^[A-Za-z]+$";
         Pattern pattern = Pattern.compile(regex);
         return pattern.matcher(userName).matches();
@@ -177,7 +173,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
             userMap.put(INUM_ATTR, inum);
             userMap.put("name", name);
             userMap.put("email", email);
-
             return userMap;
         }
 
@@ -215,7 +210,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
             userMap.put(LAST_NAME, sn);
             userMap.put(LANG, lang);
             userMap.put("empty", "false");
-
             return userMap;
         }
 
@@ -311,7 +305,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
             userMap.put(LAST_NAME, sn);
             userMap.put(PASSWORD, userPassword);
             userMap.put(LANG, lang);
-
             return userMap;
         }
 
@@ -350,14 +343,6 @@ public class JansUsernameUpdate extends UsernameUpdate {
                     "subject", "Your username has been updated successfully",
                     "body", "Your username has been updated to",
                     "footer", "Thanks for keeping your account secure."));
-            translations.put("es", Map.of(
-                    "subject", "Su nombre de usuario se ha actualizado correctamente",
-                    "body", "Su nombre de usuario se ha actualizado a",
-                    "footer", "Gracias por mantener su cuenta segura."));
-            translations.put("fr", Map.of(
-                    "subject", "Votre nom d'utilisateur a été mis à jour avec succès",
-                    "body", "Votre nom d'utilisateur a été mis à jour en",
-                    "footer", "Merci de garder votre compte sécurisé."));
 
             Map<String, String> bundle = translations.getOrDefault(preferredLang, translations.get("en"));
 
@@ -380,10 +365,10 @@ public class JansUsernameUpdate extends UsernameUpdate {
                     textBody,
                     htmlBody);
 
-            LogUtils.log("Username update email sent to %", to);
+            LogUtils.log("Email sent to %", to);
             return sent;
         } catch (Exception e) {
-            LogUtils.log("Failed to send username update email: %", e.getMessage());
+            LogUtils.log("Failed to send email: %", e.getMessage());
             return false;
         }
     }
