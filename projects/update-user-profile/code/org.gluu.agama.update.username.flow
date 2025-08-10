@@ -5,7 +5,7 @@ Flow org.gluu.agama.update.username
 // "Access Token call start"
 Log "@info Access Token call start"
 authCheck = Call org.gluu.agama.update.JansUsernameUpdate#validateBearerToken access_token
-When authCheck.valid is false
+When authCheck.valid is true
      authErrorResponse = { success:false, error: authCheck.error }
      Finish authErrorResponse
 //  Create  variable for UI feedback
@@ -58,8 +58,8 @@ Repeat 6 times max
                          //  Finish the flow successfully
                          Log "@info Finish the flow successfully"
                          //  Finish the flow successfully
-                         it_cffzj = {success:true, data:  { userId: updatedUser.uid } }
-                         Finish it_cffzj
+                         it_qcjew = {success:true, data:  { userId: updatedUser.uid } }
+                         Finish it_qcjew
                     Otherwise
                          //  User update failed log
                          Log "@info User update failed. Error : %" E
@@ -67,5 +67,5 @@ Repeat 6 times max
 //  Maximum attempt reached
 Log "@info Maximum attempt reached"
 //  User Registration flow failed
-it_subnz = {success:false, error: "User update flow reached max attempts try later"}
-Finish it_subnz
+it_pdoya = {success:false, error: "User update flow reached max attempts try later"}
+Finish it_pdoya
