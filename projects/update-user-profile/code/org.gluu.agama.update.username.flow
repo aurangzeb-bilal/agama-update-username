@@ -1,93 +1,73 @@
 Flow org.gluu.agama.update.username
      Basepath ""
      Timeout 50000 seconds
-
-// Create variable for UI feedback
 uiFeedback = {}
 uiFeedback.errorMessage = ""
-
-// Iterate x times max
+//  Iterate x times max
 Repeat 6 times max
-     // Retrieve user profile from UI
+     //  Retrieve user profile from UI
      searchUserInput = RRF "searchUser.ftlh" uiFeedback
-     
-     // When searchUserForm is submitted
+     //  When searchUserForm is submitted
      When searchUserInput.formType is "searchUserForm"
-          // Validate access token first
+          //  Validate access token first
           accessToken = searchUserInput.access_token
           Log "@info Validating access token: %" accessToken
-          
-          // Create an instance of Update service
+          //  Create an instance of Update service
           usernameUpdateService = Call org.gluu.agama.user.UsernameUpdate#getInstance 
-          
-          // Validate the bearer token
+          //  Validate the bearer token
           authCheck = Call org.gluu.agama.update.JansUsernameUpdate#validateBearerToken accessToken
-          
-          // Check if token validation failed
+          //  Check if token validation failed
           When authCheck.valid is false
-               authErrorResponse = { success:false, error: authCheck.error }
-               Finish authErrorResponse
-          
-          // Token is valid, proceed with user search
-          Log "@info Token validation successful for user: %" authCheck.username
-          
-          // Assign username to a variable
-          userName = searchUserInput.uid
-          
-          // Get user by username
-          userWithUid = Call usernameUpdateService getUserEntityByUsername userName
-          
-          // When user with provided username not found
-          When userWithUid.empty is true
-               // Show error
-               uiFeedback.errorMessage = "User not registered with this UserName"
+               // CHANGED: Instead of Finish, set error message and continue loop
+               uiFeedback.errorMessage = authCheck.errorMessage
+               // This will loop back to show searchUser.ftlh with the error message
           Otherwise
-               // Display update user page
-               userInput = RRF "updateUserUsername.ftlh" userWithUid
-               
-               // When fields values are not entered
-               When userInput.empty is true
-                    // Show error
-                    uiFeedback.errorMessage = "User input fields are empty"
+               //  Token is valid, proceed with user search
+               Log "@info Token validation successful for user: %" authCheck.username
+               //  Assign username to a variable
+               userName = searchUserInput.uid
+               //  Get user by username
+               userWithUid = Call usernameUpdateService getUserEntityByUsername userName
+               //  When user with provided username not found
+               When userWithUid.empty is true
+                    uiFeedback.errorMessage = "User not registered with this UserName"
                Otherwise
-                    // Check user already exists or not with username
-                    userWithUid = Call usernameUpdateService getUserEntityByInum userInput.inum
-                    
-                    // Call user registration service method to update a user
-                    inum = Call usernameUpdateService updateUser userInput
-                    
-                    // If user update success
-                    When inum is not null
-                         updatedUser = Call usernameUpdateService getUserEntityByInum inum
-                         
-                         // Show user updation log
-                         Log "@info User % has been updated" inum
-                         
-                         // Extract fields from updated user
-                         email = updatedUser.email
-                         newUsername = updatedUser.uid
-                         lang = updatedUser.lang
-                         
-                         // Send confirmation email
-                         emailStatus = Call usernameUpdateService sendUsernameUpdateEmail email newUsername lang
-                         
-                         // Email sent to the user
-                         Log "@info Email sent to the user: % % %" lang email newUsername
-                         
-                         // Show acknowledgement UI page for successful Update 
-                         acknowledgementInput = RRF "acknowledgementUsername.ftlh" 
-                         
-                         // Finish the flow successfully
-                         Log "@info Finish the flow successfully"
-                         it_osusi = {success:true, data: { userId: updatedUser.uid } }
-                         Finish it_osusi
+                    //  Display update user page
+                    userInput = RRF "updateUserUsername.ftlh" userWithUid
+                    //  When fields values are not entered
+                    When userInput.empty is true
+                         //  Show error
+                         uiFeedback.errorMessage = "User input fields are empty"
                     Otherwise
-                         // User update failed log
-                         Log "@info User update failed"
-                         uiFeedback.errorMessage = "User update failed"
-
-// Maximum attempt reached
+                         //  Check user already exists or not with username
+                         userWithUid = Call usernameUpdateService getUserEntityByInum userInput.inum
+                         //  Call user registration service method to update a user
+                         inum = Call usernameUpdateService updateUser userInput
+                         //  If user update success
+                         When inum is not null
+                              updatedUser = Call usernameUpdateService getUserEntityByInum inum
+                              //  Show user updation log
+                              Log "@info User % has been updated" inum
+                              //  Extract fields from updated user
+                              email = updatedUser.email
+                              newUsername = updatedUser.uid
+                              lang = updatedUser.lang
+                              //  Send confirmation email
+                              emailStatus = Call usernameUpdateService sendUsernameUpdateEmail email newUsername lang
+                              //  Email sent to the user
+                              Log "@info Email sent to the user: % % %" lang email newUsername
+                              //  Show acknowledgement UI page for successful Update
+                              acknowledgementInput = RRF "acknowledgementUsername.ftlh" 
+                              //  Finish the flow successfully
+                              Log "@info Finish the flow successfully"
+                              itOsusi = {success:true, data: { userId: updatedUser.uid } }
+                              Finish itOsusi
+                         Otherwise
+                              //  User update failed log
+                              Log "@info User update failed"
+                              uiFeedback.errorMessage = "User update failed"
+//  Maximum attempt reached
 Log "@info Maximum attempt reached"
-// User Registration flow failed
-it_tmsvu = {success:false, error: "User update flow reached max attempts try later"}
-Finish it_tmsvu
+//  User Registration flow failed
+itTmsvu = {success:false, error: "User update flow reached max attempts try later"}
+Finish itTmsvu
